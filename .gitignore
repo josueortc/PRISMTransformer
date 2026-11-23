@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# PRISMT .gitignore
+#
+# Rule of thumb: user data, run outputs and environments are never committed.
+# Small files that are part of the package (test fixtures) are re-included
+# at the bottom. Do not name fixture folders "runs", "logs",
+# "artifacts" or "results": a directory pattern here cannot be re-included.
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.venv*/
+venv/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+*.asv
+*~
+.vscode/
+.idea/
+
+# Data and run outputs
+*.mat
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pt
+*.pth
+*.journal
+*.db
+*.partial
+runs/
+prismt_runs/
+hpo_runs/
+artifacts/
+logs/
+tests/matlab/results/
+
+# Re-include small files that are part of the package
+!tests/fixtures/**

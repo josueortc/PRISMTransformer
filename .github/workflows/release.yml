@@ -1,0 +1,50 @@
+# A version tag (v0.1.0, ...) makes a GitHub release. Zenodo archives every published
+# release of this repository and gives it a DOI (once the repository is switched on at
+# https://zenodo.org/account/settings/github/). The supplementary manual for that version
+# is attached to the release.
+#
+# To release: set src/prismt/resources/VERSION and the version in CITATION.cff, commit,
+# then: git tag v0.1.0 && git push origin v0.1.0
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag matches VERSION and CITATION.cff
+        run: |
+          ver="$(tr -d '[:space:]' < src/prismt/resources/VERSION)"
+          if [ "${GITHUB_REF_NAME#v}" != "$ver" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match src/prismt/resources/VERSION ($ver)"; exit 1
+          fi
+          if ! grep -qx "version: $ver" CITATION.cff; then
+            echo "::error::CITATION.cff does not say version: $ver"; exit 1
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: PRISMT ${{ github.ref_name }}
+          generate_release_notes: true
+  manual:
+    # Separate from the release, so a problem with LaTeX never blocks the release (and its DOI).
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.11"}
+      - name: Install pandoc and XeLaTeX
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q pandoc texlive-xetex texlive-latex-recommended texlive-latex-extra \
+            texlive-fonts-recommended lmodern fonts-liberation fonts-dejavu-core
+      - run: python tools/build_docs.py pdf --ref "$GITHUB_REF_NAME" --out "PRISMT_supplementary_${GITHUB_REF_NAME}.pdf"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: PRISMT_supplementary_${{ github.ref_name }}.pdf

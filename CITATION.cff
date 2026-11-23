@@ -1,0 +1,58 @@
+# How to cite PRISMT. GitHub shows this as "Cite this repository"; Zenodo reads
+# .zenodo.json for the archived record (keep the two in step: tests/python/test_docs.py checks it).
+cff-version: 1.2.0
+message: >-
+  If you use PRISMT, please cite the software (this record) and the PRISMt paper listed
+  under references.
+type: software
+title: "PRISMT: transformers for trial-structured neural and behavioral recordings, driven from MATLAB"
+abstract: >-
+  PRISMT lets experimentalists train the PRISMt transformer on trial-structured recordings
+  (brain activity, behavior, or both) from a MATLAB app, without writing code. It classifies
+  trial conditions and learns the structure of the recordings with a masked autoencoder,
+  tests on held-out animals by cross-validation, and compares every result with simple
+  reference models.
+authors:
+  - given-names: Josue
+    family-names: Ortega Caro
+    affiliation: Yale University School of Medicine
+  - given-names: Hannah M.
+    family-names: Batchelor
+    affiliation: Yale University School of Medicine
+  - given-names: Sweyta
+    family-names: Lohani
+    affiliation: Yale University School of Medicine
+  - given-names: Clayton
+    family-names: Barnes
+    affiliation: Yale University School of Medicine
+  - given-names: Jessica A.
+    family-names: Cardin
+    affiliation: Yale University School of Medicine
+version: 0.2.0
+license: Apache-2.0
+repository-code: "https://github.com/josueortc/PRISMTransformer"
+url: "https://github.com/josueortc/PRISMTransformer"
+keywords:
+  - neuroscience
+  - transformer
+  - masked autoencoder
+  - widefield imaging
+  - behavior
+  - MATLAB
+references:
+  - type: article
+    title: Selective changes in cortical cholinergic signaling during learning
+    authors:
+      - given-names: Josue
+        family-names: Ortega Caro
+      - given-names: Hannah M.
+        family-names: Batchelor
+      - given-names: Sweyta
+        family-names: Lohani
+      - given-names: David
+        family-names: van Dijk
+      - given-names: Jessica A.
+        family-names: Cardin
+    journal: bioRxiv
+    year: 2025
+    doi: 10.1101/2025.08.29.673096

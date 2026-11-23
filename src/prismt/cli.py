@@ -1,0 +1,347 @@
+"""Command-line interface: ``python -m prismt <command> [options]``.
+
+Every command accepts ``--json``: then stdout carries exactly one JSON object (what MATLAB
+reads) and all logging goes to stderr. Exit codes: 0 ok, 1 internal error, 2 problem with
+the data or settings, 3 cancelled, 4 problem with the Python environment.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+import traceback
+from collections.abc import Callable
+
+from prismt import __version__
+from prismt.errors import EXIT_INTERNAL, EXIT_OK, EXIT_USER, PrismtError
+from prismt.jsonutil import dumps
+
+log = logging.getLogger("prismt")
+
+
+def _emit(args: argparse.Namespace, payload: dict, human: str | None = None) -> None:
+    if getattr(args, "json", False):
+        sys.stdout.write(dumps(payload, indent=None) + "\n")
+    elif human is not None:
+        sys.stdout.write(human.rstrip() + "\n")
+    sys.stdout.flush()
+
+
+# ---------------------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------------------
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from prismt.env import doctor
+
+    report = doctor(require=args.require, out_dir=args.out)
+    lines = [f"PRISMT {report['prismt']['version']} — {'ready' if report['ok'] else 'NOT ready'}"]
+    for c in report["checks"]:
+        lines.append(f"  [{'ok' if c['ok'] else 'FAIL'}] {c['name']}: {c['message']}")
+        if not c["ok"] and c["hint"]:
+            lines.append(f"         → {c['hint']}")
+    for w in report["warnings"]:
+        lines.append(f"  [warning] {w['message']}")
+    _emit(args, report, "\n".join(lines))
+    return EXIT_OK if report["ok"] else 4
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    from prismt.io import validate_file
+
+    report = validate_file(args.data)
+    if report["ok"]:
+        s = report["summary"]
+        human = (f"OK: {s['n_trials']} trials, {s['n_channels']} channels x {s['n_time']} time points x "
+                 f"{s['n_modalities']} modalities ({', '.join(m['name'] for m in s['modalities'])})")
+    else:
+        human = "\n".join(f"ERROR {e['code']}: {e['message']} {e.get('hint', '')}" for e in report["errors"])
+    for w in report["warnings"]:
+        human += f"\nwarning: {w['message']}"
+    _emit(args, report, human)
+    return EXIT_OK if report["ok"] else EXIT_USER
+
+
+def cmd_synth(args: argparse.Namespace) -> int:
+    from prismt.data.synthetic import write_synthetic
+
+    path = write_synthetic(args.out, args.profile, args.difficulty, args.seed)
+    _emit(args, {"ok": True, "path": str(path)}, f"Wrote {path}")
+    return EXIT_OK
+
+
+def cmd_defaults(args: argparse.Namespace) -> int:
+    from prismt.config import schema_for_matlab
+
+    payload = schema_for_matlab()
+    _emit(args, payload, dumps(payload))
+    return EXIT_OK
+
+
+def _load(args: argparse.Namespace) -> tuple[dict, dict]:
+    import json
+    from pathlib import Path
+
+    from prismt.config import load_config
+
+    source = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    return load_config(args.config), source
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    from prismt.run import check
+
+    cfg, _ = _load(args)
+    report = check(cfg, timing=args.timing)
+    s = report["selection"]
+    lines = [f"{s['n_trials']} trials selected; {report['model']['tokens_per_trial']} tokens per trial; "
+             f"{report['model']['parameters']:,} parameters.",
+             f"Split: {report['split']['scheme']} on {report['split']['test_on']} ({report['split']['n_folds']} fold(s))."]
+    if s["class_names"]:
+        lines.append("Classes: " + ", ".join(f"{n} ({c})" for n, c in zip(s["class_names"], s["class_counts"])))
+    if report["estimate"]:
+        e = report["estimate"]
+        lines.append(f"About {e['seconds_per_epoch']} s per epoch on {e['device']}; at most {e['max_total_minutes']} min.")
+    for w in report["warnings"]:
+        lines.append(f"warning: {w['message']}")
+    _emit(args, report, "\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    from prismt.run import run
+
+    cfg, source = _load(args)
+    if args.combine:
+        from prismt.run import combine
+
+        if not args.run_dir:
+            raise SystemExit("--combine needs --run-dir")
+        out = combine(cfg, args.run_dir)
+    else:
+        out = run(cfg, run_dir=args.run_dir, only_fold=args.fold, source=source)
+    import json
+
+    metrics = json.loads((out / "metrics.json").read_text()) if (out / "metrics.json").exists() else {}
+    _emit(args, {"ok": True, "run_dir": str(out), "summary": metrics.get("summary_lines", [])},
+          "\n".join([f"Run folder: {out}", *metrics.get("summary_lines", [])]))
+    return EXIT_OK
+
+
+def cmd_hpo(args: argparse.Namespace) -> int:
+    from prismt.hpo import run_hpo
+
+    cfg, source = _load(args)
+    finalize = True if args.finalize else (False if args.worker is not None else None)
+    if args.task_index is not None:
+        finalize = False
+    out = run_hpo(cfg, args.run_dir, worker=args.worker, fold=None if args.fold is None else args.fold - 1,
+                  task_index=args.task_index, do_finalize=finalize, source=source)
+    import json
+
+    summary = json.loads((out / "hpo_summary.json").read_text()) if (out / "hpo_summary.json").exists() else {}
+    _emit(args, {"ok": True, "run_dir": str(out), "summary": summary.get("summary_lines", [])},
+          "\n".join([f"Run folder: {out}", *summary.get("summary_lines", [])]))
+    return EXIT_OK
+
+
+def cmd_jobfolder(args: argparse.Namespace) -> int:
+    import json
+    from pathlib import Path
+
+    from prismt.cluster import write_job_folder
+    from prismt.config import load_config
+    from prismt.run import prepare
+
+    source = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    profile = json.loads(Path(args.profile).read_text(encoding="utf-8")) if args.profile else {}
+    n_folds = 1
+    n_folds = len(prepare(load_config(args.config)).plan.folds)
+    job = write_job_folder(source, args.out, profile, mode=args.mode, n_folds=n_folds, hpo_workers=args.workers,
+                           dataset_remote=args.remote_dataset, name=args.name)
+    readme = (job / "README.txt").read_text(encoding="utf-8")
+    _emit(args, {"ok": True, "job_dir": str(job), "n_folds": n_folds, "readme": readme}, f"Job folder: {job}\n\n{readme}")
+    return EXIT_OK
+
+
+def cmd_summarize(args: argparse.Namespace) -> int:
+    from prismt.run import summarize
+
+    info = summarize(args.run)
+    lines = [info["run_dir"]]
+    if "status" in info:
+        lines.append(f"state: {info['status'].get('state')}")
+    lines += info.get("metrics", {}).get("summary_lines", [])
+    _emit(args, info, "\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_interpret(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from prismt.interpret.pipeline import InterpretOptions, interpret
+    from prismt.jsonutil import read_json
+
+    rank = args.rank if args.rank == "auto" else int(args.rank)
+    opts = InterpretOptions(classes=tuple(args.classes) if args.classes else None, rank=rank, max_rank=args.max_rank,
+                            mode=args.mode, restarts=args.restarts, bootstrap=args.bootstrap,
+                            permutations=args.permutations, compare=not args.no_compare,
+                            faithfulness=not args.no_faithfulness, test_motifs=not args.no_motif_test,
+                            per_trial_u=args.per_trial_u, seed=args.seed,
+                            device=args.device)
+    out = interpret(Path(args.run), opts)
+    info = read_json(out / "interpret.json")
+    lines = [f"Interpretation: {out}", f"{info['rank']} motifs ({info['mode']}), classes {info['classes'][0]} vs "
+             f"{info['classes'][1]}"]
+    for m in info["motifs"]:
+        lines.append(f"  motif {m['index']}: modality {m['modality']['interval'] or m['modality']['point']}, "
+                     f"stability {m['stability_bootstrap']}")
+        if m.get("test"):
+            lines.append(f"    {m['test']['answer']}")
+    gt = info.get("ground_truth")
+    if gt:
+        for name, r in gt["methods"].items():
+            lines.append(f"  {name:>16}: unit AUROC {r['unit_auroc']}, motif r {r['motif_correlation']:.3f}")
+    _emit(args, {"ok": True, "interpret_dir": str(out), "summary": info}, "\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    from prismt.compare import compare
+
+    res = compare(args.runs)
+    _emit(args, {"ok": True, **res}, "\n".join(res["summary_lines"]))
+    return EXIT_OK
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from prismt.report import report
+
+    out = report(args.run, args.out)
+    _emit(args, {"ok": True, "report": str(out), "methods": str(out.with_name("report_methods.txt"))},
+          f"Report: {out}")
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------------------
+# Parser
+# ---------------------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="prismt", description="PRISMT command line")
+    parser.add_argument("--version", action="version", version=f"prismt {__version__}")
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    def add(name: str, func: Callable, help_: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help_, description=help_)
+        p.add_argument("--json", action="store_true", help="print one JSON object on stdout")
+        p.add_argument("-v", "--verbose", action="store_true", help="more log output (stderr)")
+        p.set_defaults(func=func)
+        return p
+
+    p = add("doctor", cmd_doctor, "check that this Python can run PRISMT")
+    p.add_argument("--require", default="auto", choices=["auto", "cpu", "cuda", "mps"],
+                   help="fail unless this device is usable")
+    p.add_argument("--out", default=None, help="also check that this folder is writable")
+
+    p = add("validate", cmd_validate, "check a PRISMT dataset file and summarize it")
+    p.add_argument("data", help="dataset file (.mat written by prismt.writeDataset, .h5 or .npz)")
+
+    p = add("synth", cmd_synth, "write a synthetic dataset with known structure")
+    p.add_argument("--profile", default="fast", choices=["tiny", "fast", "tutorial"])
+    p.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", required=True, help="output file (.mat)")
+
+    add("defaults", cmd_defaults, "print the settings schema, presets and defaults (for MATLAB)")
+
+    p = add("check", cmd_check, "check a run's settings against its dataset without training")
+    p.add_argument("--config", required=True, help="run settings (JSON)")
+    p.add_argument("--timing", action="store_true", help="also time a few training steps to estimate run time")
+
+    p = add("train", cmd_train, "train and evaluate a model")
+    p.add_argument("--config", required=True, help="run settings (JSON)")
+    p.add_argument("--run-dir", default=None, help="run folder to write (default: a new folder in output.root)")
+    p.add_argument("--fold", type=int, default=None, help="only this cross-validation fold (1-based)")
+    p.add_argument("--combine", action="store_true", help="pool folds that were trained as separate jobs")
+
+    p = add("hpo", cmd_hpo, "find the best model: search settings within each fold, then retrain and test each fold's best")
+    p.add_argument("--config", required=True, help="run settings (JSON)")
+    p.add_argument("--run-dir", default=None, help="run folder (shared by all cluster workers)")
+    p.add_argument("--worker", type=int, default=None, help="cluster worker number: search only, no final retraining")
+    p.add_argument("--finalize", action="store_true", help="only retrain the best settings found so far")
+    p.add_argument("--fold", type=int, default=None, help="search only this fold (1-based)")
+    p.add_argument("--task-index", type=int, default=None,
+                   help="cluster array task: picks the fold and worker (fold = index // hpo.workers)")
+
+    p = add("jobfolder", cmd_jobfolder, "write a self-contained SLURM job folder")
+    p.add_argument("--config", required=True, help="run settings (JSON)")
+    p.add_argument("--out", required=True, help="folder in which to create the job folder")
+    p.add_argument("--profile", default=None, help="cluster profile (JSON)")
+    p.add_argument("--mode", default="train", choices=["train", "hpo"])
+    p.add_argument("--workers", type=int, default=4, help="parallel tuning workers (hpo)")
+    p.add_argument("--remote-dataset", default=None, help="dataset path on the cluster")
+    p.add_argument("--name", default=None, help="job name")
+
+    p = add("interpret", cmd_interpret, "explain a classification run with PRISMt (attribution and motifs)")
+    p.add_argument("run", help="run folder of a finished classification")
+    p.add_argument("--classes", nargs=2, default=None, metavar=("A", "B"), help="the two classes to contrast")
+    p.add_argument("--rank", default="auto", help="number of motifs, or auto")
+    p.add_argument("--max-rank", type=int, default=6, help="largest number of motifs tried by --rank auto")
+    p.add_argument("--mode", default="auto", choices=["auto", "trials", "discriminative"])
+    p.add_argument("--restarts", type=int, default=None, help="random restarts of the decomposition")
+    p.add_argument("--bootstrap", type=int, default=200, help="bootstrap draws for intervals (0 = none)")
+    p.add_argument("--permutations", type=int, default=1000, help="label permutations for region significance")
+    p.add_argument("--no-compare", action="store_true", help="skip the comparison methods")
+    p.add_argument("--no-faithfulness", action="store_true", help="skip occlusion (benchmark data)")
+    p.add_argument("--no-motif-test", action="store_true", help="skip the occlusion test of each motif")
+    p.add_argument("--per-trial-u", action="store_true", help="per-trial decision direction")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", default="auto", help="auto, cpu, cuda or mps")
+
+    p = add("compare", cmd_compare, "put finished runs side by side (scores, intervals, paired differences)")
+    p.add_argument("runs", nargs="+", help="two or more run folders; the first is the reference")
+
+    p = add("report", cmd_report, "write a PDF report of a run (verdict, figures, settings, methods text)")
+    p.add_argument("run", help="run folder")
+    p.add_argument("--out", default=None, help="PDF file (default: <run>/report.pdf)")
+
+
+    p = add("summarize", cmd_summarize, "describe a run folder")
+    p.add_argument("run", help="run folder")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    import warnings
+
+    # numpy 2.x with Apple's Accelerate BLAS reports spurious floating-point warnings in matmul.
+    warnings.filterwarnings("ignore", message=".*encountered in matmul", category=RuntimeWarning)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        return EXIT_USER
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, stream=sys.stderr,
+                        format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    try:
+        return int(args.func(args))
+    except PrismtError as err:
+        if args.json:
+            _emit(args, {"ok": False, "error": err.to_dict()})
+        log.error("%s", err.to_dict()["title"])
+        log.error("%s", err)
+        return err.exit_code
+    except KeyboardInterrupt:
+        return 3
+    except Exception as exc:  # noqa: BLE001 - last resort: never die without a message
+        detail = traceback.format_exc()
+        log.error("Unexpected error: %s\n%s", exc, detail)
+        if args.json:
+            _emit(args, {"ok": False, "error": {"code": "E_INTERNAL", "title": "PRISMT hit an unexpected error",
+                                                 "message": str(exc), "hint": "Please report this with the log.",
+                                                 "field": "", "traceback": detail}})
+        return EXIT_INTERNAL

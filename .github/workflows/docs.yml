@@ -1,0 +1,25 @@
+# The supplementary PDF still builds after documentation changes. The PDF is kept as a
+# workflow artifact; the copy in docs/ is refreshed with: python tools/build_docs.py pdf
+name: docs
+on:
+  push:
+    paths: [README.md, docs/**, tools/build_docs.py, .github/workflows/docs.yml]
+  pull_request:
+    paths: [README.md, docs/**, tools/build_docs.py, .github/workflows/docs.yml]
+jobs:
+  pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.11"}
+      - name: Install pandoc and XeLaTeX
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q pandoc texlive-xetex texlive-latex-recommended texlive-latex-extra \
+            texlive-fonts-recommended lmodern fonts-liberation fonts-dejavu-core
+      - run: python tools/build_docs.py pdf --out PRISMT_supplementary.pdf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PRISMT_supplementary
+          path: PRISMT_supplementary.pdf

@@ -1,0 +1,45 @@
+{
+  "title": "PRISMT: transformers for trial-structured neural and behavioral recordings, driven from MATLAB",
+  "upload_type": "software",
+  "description": "PRISMT lets experimentalists train the PRISMt transformer on trial-structured recordings (brain activity, behavior, or both) from a MATLAB app, without writing code. It classifies trial conditions and learns the structure of the recordings with a masked autoencoder, tests on held-out animals by cross-validation, and compares every result with simple reference models. The supplementary manual (docs/PRISMT_supplementary.pdf) documents the app, the settings, the dataset format and how to read the results.",
+  "creators": [
+    {
+      "name": "Ortega Caro, Josue",
+      "affiliation": "Yale University School of Medicine"
+    },
+    {
+      "name": "Batchelor, Hannah M.",
+      "affiliation": "Yale University School of Medicine"
+    },
+    {
+      "name": "Lohani, Sweyta",
+      "affiliation": "Yale University School of Medicine"
+    },
+    {
+      "name": "Barnes, Clayton",
+      "affiliation": "Yale University School of Medicine"
+    },
+    {
+      "name": "Cardin, Jessica A.",
+      "affiliation": "Yale University School of Medicine"
+    }
+  ],
+  "license": "Apache-2.0",
+  "access_right": "open",
+  "keywords": [
+    "neuroscience",
+    "transformer",
+    "masked autoencoder",
+    "widefield imaging",
+    "behavior",
+    "MATLAB"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.1101/2025.08.29.673096",
+      "relation": "isSupplementTo",
+      "scheme": "doi",
+      "resource_type": "publication-preprint"
+    }
+  ]
+}
