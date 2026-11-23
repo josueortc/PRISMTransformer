@@ -1,6 +1,7 @@
 # PRISMT
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24477929.svg)](https://doi.org/10.5281/zenodo.24477929)
 
 PRISMT lets you train a modern AI model (a *transformer*, the model of the PRISMt paper) on
 your experiment's recordings and ask it two kinds of questions, **without writing code**
@@ -329,10 +330,23 @@ tests/                  MATLAB and Python tests
 ## How to cite
 
 If you use PRISMT, please cite the software and the PRISMt paper. GitHub's *Cite this
-repository* button (from [CITATION.cff](CITATION.cff)) gives both in APA and BibTeX. Each
-release is archived on Zenodo with its own DOI.
+repository* button (from [CITATION.cff](CITATION.cff)) gives both in APA and BibTeX.
+
+The software is archived on Zenodo: [doi:10.5281/zenodo.24477929](https://doi.org/10.5281/zenodo.24477929) always resolves
+to the latest version, and each release also has its own DOI (version 0.2.0:
+[doi:10.5281/zenodo.24477930](https://doi.org/10.5281/zenodo.24477930)); cite the version you used when it matters.
 
 ```bibtex
+@software{ortegacaro_prismt,
+  title     = {PRISMT: transformers for trial-structured neural and behavioral recordings, driven from MATLAB},
+  author    = {Ortega Caro, Josue and Batchelor, Hannah M. and Lohani, Sweyta and
+               Barnes, Clayton and Cardin, Jessica A.},
+  publisher = {Zenodo},
+  year      = {2026},
+  doi       = {10.5281/zenodo.24477929},
+  url       = {https://doi.org/10.5281/zenodo.24477929}
+}
+
 @article{ortegacaro2025cholinergic,
   title     = {Selective changes in cortical cholinergic signaling during learning},
   author    = {Ortega Caro, Josue and Batchelor, Hannah M. and Lohani, Sweyta and
@@ -345,7 +359,7 @@ release is archived on Zenodo with its own DOI.
 
 ## Status and license
 
-Version 0.1. Tested on macOS (MATLAB R2025a, Apple GPU and CPU) and, in automatic tests,
+Version 0.2. Tested on macOS (MATLAB R2025a, Apple GPU and CPU) and, in automatic tests,
 on Linux with MATLAB R2021a and the latest release; cluster scripts are tested against a
 simulated SLURM. Windows is expected to work but is not tested routinely. The
 PRISMt interpretation (attribution and motif decomposition) follows the methods of the

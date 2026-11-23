@@ -118,3 +118,19 @@ def test_citation_metadata_agree():
     assert re.search(r"^license:\s*(\S+)", cff, re.M).group(1) == zen["license"] == "Apache-2.0"
     assert 'license = {text = "Apache-2.0"}' in pyproject
     assert "Apache License" in _text(REPO / "LICENSE")
+
+
+def test_software_doi_is_cited_everywhere():
+    """Once Zenodo has given the software a DOI, the README and the manual's title page carry it."""
+    head = _text(REPO / "CITATION.cff").split("\nreferences:")[0]
+    m = re.search(r"^doi:\s*(\S+)", head, re.M)
+    if not m:
+        pytest.skip("no software DOI yet (before the first release)")
+    doi = m.group(1)
+    assert re.fullmatch(r"10\.5281/zenodo\.\d+", doi), doi
+    readme = _text(REPO / "README.md")
+    assert f"https://doi.org/{doi}" in readme and f"doi       = {{{doi}}}" in readme
+    sys.path.insert(0, str(REPO / "tools"))
+    import build_docs
+
+    assert build_docs.software_doi() == doi

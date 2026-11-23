@@ -56,6 +56,13 @@ def citation() -> dict:
     return json.loads((REPO / ".zenodo.json").read_text())
 
 
+def software_doi() -> str | None:
+    """The software's own DOI (Zenodo, all versions), from CITATION.cff; None before the first release."""
+    head = (REPO / "CITATION.cff").read_text().split("\nreferences:")[0]
+    m = re.search(r"^doi:\s*(\S+)", head, re.M)
+    return m.group(1) if m else None
+
+
 def chapter_id(src: str) -> str:
     return "ch-" + PAGE_OF[src][0].lower()
 
@@ -268,13 +275,13 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("pdf", help="build the supplementary PDF")
     p.add_argument("--out", default=str(REPO / PDF_PATH))
     p.add_argument("--ref", default="main", help="git ref that links to code point at (a tag for a release)")
-    p.add_argument("--doi", default=None, help="the release DOI, printed on the title page")
+    p.add_argument("--doi", default=None, help="DOI printed on the title page (default: the doi in CITATION.cff)")
     w = sub.add_parser("wiki", help="write the wiki pages to a folder")
     w.add_argument("out")
     w.add_argument("--ref", default="main")
     a = ap.parse_args(argv)
     if a.what == "pdf":
-        print(build_pdf(Path(a.out), a.ref, a.doi))
+        print(build_pdf(Path(a.out), a.ref, a.doi or software_doi()))
     else:
         for path in build_wiki(Path(a.out), a.ref):
             print(path)
